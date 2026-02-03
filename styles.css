@@ -454,147 +454,26 @@ details.gcal-settings summary{
 #toast.show{ opacity:1; }
 
 
-/* ===== ADHD-friendly dashboard + next action ===== */
-.tracker-dashboard{
-  display:grid;
-  grid-template-columns: repeat(4, minmax(0,1fr));
-  gap:10px;
-  margin: 12px 0 14px;
-}
-.dash-card{
-  border:1px solid rgba(255,255,255,.12);
-  background: rgba(255,255,255,.05);
-  border-radius: 14px;
-  padding: 12px 12px 10px;
-  text-align:left;
-  cursor:pointer;
-  transition: transform .12s ease, border-color .12s ease, background .12s ease;
-}
-.dash-card:hover{
-  transform: translateY(-2px);
-  border-color: rgba(122,162,255,.35);
-  background: rgba(122,162,255,.10);
-}
-.dash-card .dash-label{ font-weight:800; font-size:12px; opacity:.85; }
-.dash-card .dash-value{ font-weight:900; font-size:26px; line-height:1; margin-top:6px; }
-.dash-card .dash-sub{ font-size:12px; opacity:.70; margin-top:4px; }
-
-.dash-card.danger{ border-color: rgba(255,107,122,.35); }
-.dash-card.danger:hover{ border-color: rgba(255,107,122,.60); background: rgba(255,107,122,.10); }
-
-.dash-card.warn{ border-color: rgba(255,220,120,.30); }
-.dash-card.warn:hover{ border-color: rgba(255,220,120,.60); background: rgba(255,220,120,.12); }
-
-.dash-card.ok{ border-color: rgba(92,255,185,.25); }
-.dash-card.ok:hover{ border-color: rgba(92,255,185,.55); background: rgba(92,255,185,.10); }
-
-.next-pill{
+/* ===========================
+   Auth / Sync pill
+   =========================== */
+.auth-pill{
   display:inline-flex;
   align-items:center;
   gap:8px;
-  padding: 6px 10px;
-  border-radius: 999px;
-  font-size: 12px;
-  font-weight: 800;
-  border: 1px solid rgba(255,255,255,.12);
-  background: rgba(255,255,255,.05);
-  white-space: nowrap;
+  padding:8px 10px;
+  border-radius:999px;
+  font-size:12px;
+  font-weight:700;
+  letter-spacing:.2px;
+  border:1px solid rgba(255,255,255,.12);
+  background:rgba(255,255,255,.06);
+  color:rgba(255,255,255,.85);
 }
-.next-pill.urgent{
-  border-color: rgba(255,107,122,.35);
-  background: rgba(255,107,122,.10);
+.auth-pill.online{
+  background:rgba(76, 175, 80, .18);
+  border-color:rgba(76, 175, 80, .35);
 }
-.next-pill.soon{
-  border-color: rgba(255,220,120,.35);
-  background: rgba(255,220,120,.12);
-}
-.next-pill.done{
-  border-color: rgba(92,255,185,.30);
-  background: rgba(92,255,185,.10);
-}
-.tracker-table tr.needs-action td{
-  background: rgba(255,107,122,.06);
-}
-@media (max-width: 920px){
-  .tracker-dashboard{ grid-template-columns: repeat(2, minmax(0,1fr)); }
-}
-
-
-/* === UI POLISH & READABILITY (non-functional) === */
-body{
-  line-height: 1.45;
-  letter-spacing: .2px;
-}
-
-.input, .select, .status-select{
-  transition: border-color .15s ease, box-shadow .15s ease, background .15s ease;
-}
-.input:focus, .select:focus, .status-select:focus{
-  border-color: rgba(122,162,255,.45);
-  box-shadow: 0 0 0 3px rgba(122,162,255,.18);
-  background: rgba(0,0,0,.22);
-}
-
-.label{
-  text-transform: uppercase;
-  font-size: 11px;
-  opacity:.75;
-}
-
-.card{
-  transition: transform .15s ease, box-shadow .15s ease;
-}
-.card:hover{
-  transform: translateY(-2px);
-  box-shadow: 0 14px 34px rgba(0,0,0,.45);
-}
-
-.head h3{
-  letter-spacing:.3px;
-}
-.summary{
-  line-height:1.4;
-}
-
-.block{
-  line-height:1.45;
-}
-.block-title{
-  text-transform: uppercase;
-  font-size:11px;
-  letter-spacing:.4px;
-}
-
-.template-box{
-  line-height:1.45;
-  padding:14px 14px;
-  font-size:12.5px;
-}
-
-.btn, .mini-btn{
-  letter-spacing:.4px;
-}
-.btn.secondary{
-  box-shadow: 0 6px 18px rgba(122,162,255,.18);
-}
-
-.tracker-table td{
-  line-height:1.45;
-}
-.tracker-table th{
-  text-transform: uppercase;
-  font-size:11px;
-  letter-spacing:.4px;
-}
-
-.pill, .next-pill{
-  letter-spacing:.4px;
-}
-
-.details{
-  animation: fadeIn .18s ease;
-}
-@keyframes fadeIn{
-  from{ opacity:0; transform: translateY(-4px); }
-  to{ opacity:1; transform: translateY(0); }
+.auth-pill.local{
+  background:rgba(255,255,255,.06);
 }
