@@ -683,26 +683,164 @@ function initControls() {
 /* ===========================
    BOOKINGS + TAGGING SECTION
    =========================== */
-const auth = firebase.auth();
-const db = firebase.firestore();
 
-const btnLogin = document.getElementById("btnLogin");
-const btnLogout = document.getElementById("btnLogout");
+/* ===========================
+   FIREBASE SYNC (optional)
+   =========================== */
 
-btnLogin?.addEventListener("click", async () => {
-  const provider = new firebase.auth.GoogleAuthProvider();
-  await auth.signInWithPopup(provider);
-});
+let __authUser = null;
+let __fsUnsub = null;
 
-btnLogout?.addEventListener("click", async () => {
-  await auth.signOut();
-});
+function firebaseAvailable(){
+  return typeof window.firebase !== "undefined" && firebase?.auth && firebase?.firestore;
+}
 
-auth.onAuthStateChanged((user) => {
-  const isIn = !!user;
-  if (btnLogin) btnLogin.style.display = isIn ? "none" : "inline-flex";
-  if (btnLogout) btnLogout.style.display = isIn ? "inline-flex" : "none";
-});
+function setAuthPill(text, mode){
+  const pill = document.getElementById("authStatus");
+  if (!pill) return;
+  pill.textContent = text;
+  pill.classList.remove("online","local");
+  pill.classList.add(mode === "online" ? "online" : "local");
+}
+
+function setAuthButtons(signedIn){
+  const btnIn = document.getElementById("btnLogin");
+  const btnOut = document.getElementById("btnLogout");
+  if (btnIn) btnIn.style.display = signedIn ? "none" : "";
+  if (btnOut) btnOut.style.display = signedIn ? "" : "none";
+}
+
+function bookingsRef(){
+  if (!__authUser) return null;
+  return firebase.firestore().collection("users").doc(__authUser.uid).collection("bookings");
+}
+
+function stopBookingsSync(){
+  if (__fsUnsub) { try { __fsUnsub(); } catch {} }
+  __fsUnsub = null;
+}
+
+function startBookingsSync(){
+  if (!firebaseAvailable()) return;
+  const ref = bookingsRef();
+  if (!ref) return;
+
+  stopBookingsSync();
+
+  // Live sync from Firestore → localStorage → UI
+  __fsUnsub = ref.onSnapshot((snap) => {
+    const list = [];
+    snap.forEach(doc => {
+      const data = doc.data() || {};
+      // Ensure id exists (doc id is canonical)
+      data.id = data.id || doc.id;
+      list.push(data);
+    });
+    saveBookings(list);
+    renderBookings();
+    scheduleAllReminders();
+    setAuthPill("Synced", "online");
+  }, (err) => {
+    console.error(err);
+    setAuthPill("Sync error", "local");
+    toast("Cloud sync error (using local data).");
+  });
+}
+
+async function loginFirebase(){
+  if (!firebaseAvailable()) {
+    toast("Firebase not loaded yet.");
+    return;
+  }
+  try {
+    const provider = new firebase.auth.GoogleAuthProvider();
+    await firebase.auth().signInWithPopup(provider);
+  } catch (e) {
+    // Popup can be blocked on mobile — fallback to redirect
+    console.warn("Popup sign-in failed, trying redirect…", e);
+    try {
+      const provider = new firebase.auth.GoogleAuthProvider();
+      await firebase.auth().signInWithRedirect(provider);
+    } catch (e2) {
+      console.error(e2);
+      toast("Login failed.");
+    }
+  }
+}
+
+async function logoutFirebase(){
+  if (!firebaseAvailable()) return;
+  try { await firebase.auth().signOut(); } catch {}
+}
+
+async function upsertBookingRemote(booking){
+  const ref = bookingsRef();
+  if (!ref) return;
+  try {
+    await ref.doc(booking.id).set(booking, { merge: true });
+  } catch (e) {
+    console.error(e);
+    toast("Cloud save failed (still saved locally).");
+  }
+}
+
+async function patchBookingRemote(id, patch){
+  const ref = bookingsRef();
+  if (!ref) return;
+  try {
+    await ref.doc(id).set(patch, { merge: true });
+  } catch (e) {
+    console.error(e);
+    toast("Cloud update failed (still updated locally).");
+  }
+}
+
+async function deleteBookingRemote(id){
+  const ref = bookingsRef();
+  if (!ref) return;
+  try {
+    await ref.doc(id).delete();
+  } catch (e) {
+    console.error(e);
+    toast("Cloud delete failed (still deleted locally).");
+  }
+}
+
+function initFirebaseSyncUI(){
+  // If Firebase isn't added to the page, stay local.
+  if (!firebaseAvailable()) {
+    setAuthPill("Local", "local");
+    return;
+  }
+
+  setAuthPill("Connecting…", "local");
+
+  const btnIn = document.getElementById("btnLogin");
+  const btnOut = document.getElementById("btnLogout");
+  if (btnIn) btnIn.addEventListener("click", loginFirebase);
+  if (btnOut) btnOut.addEventListener("click", logoutFirebase);
+
+  firebase.auth().onAuthStateChanged((user) => {
+    __authUser = user || null;
+
+    if (!__authUser) {
+      stopBookingsSync();
+      setAuthButtons(false);
+      setAuthPill("Local", "local");
+      return;
+    }
+
+    setAuthButtons(true);
+    setAuthPill("Syncing…", "online");
+
+    // Handle redirect login completion
+    firebase.auth().getRedirectResult().catch(() => {});
+
+    startBookingsSync();
+  });
+}
+
+
 
 const STATUS = {
   ID_REQUESTED: "ID REQUESTED",
@@ -753,6 +891,7 @@ function persistBookingPatch(id, patch) {
   if (idx === -1) return;
   list[idx] = { ...list[idx], ...patch };
   saveBookings(list);
+  patchBookingRemote(id, patch);
 }
 
 function scheduleReminderForBooking(b) {
@@ -859,74 +998,6 @@ function updateMetricsAndChart(list){
   }).join("");
 }
 
-
-function daysUntil(dateStr){
-  if (!dateStr) return null;
-  const d = new Date(dateStr + "T00:00:00");
-  if (isNaN(d.getTime())) return null;
-  const now = new Date();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const diff = Math.round((d.getTime() - today.getTime()) / (1000*60*60*24));
-  return diff;
-}
-
-function computeNextAction(b){
-  const du = daysUntil(b.checkIn);
-  const status = b.status;
-
-  if (status === "CANCELLED") return { label: "Cancelled", tone: "done", urgent: false, priority: 99 };
-  if (status === "CONFIRMED") return { label: "Confirmed", tone: "done", urgent: false, priority: 90 };
-
-  // Time-based nudges
-  if (du !== null && du <= 2) {
-    return { label: "Send CHECK‑IN DETAILS", tone: "urgent", urgent: true, priority: 0 };
-  }
-  if (du !== null && du <= 5 && (status === "ID_REQUESTED" || status === "SECOND_ID_REQUESTED")) {
-    return { label: "Send ID REMINDER", tone: "soon", urgent: true, priority: 1 };
-  }
-
-  // Status-based nudges
-  if (status === "ID_REMINDER") return { label: "Follow up now", tone: "urgent", urgent: true, priority: 0 };
-  if (status === "SECOND_ID_REQUESTED") return { label: "Waiting 2nd ID", tone: "soon", urgent: false, priority: 2 };
-  if (status === "ID_REQUESTED") return { label: "Waiting IDs", tone: "soon", urgent: false, priority: 3 };
-  if (status === "ID_ALTERNATE") return { label: "Request alt info", tone: "soon", urgent: false, priority: 4 };
-
-  return { label: "Review", tone: "", urgent: false, priority: 5 };
-}
-
-function updateDashboard(list){
-  const needs = list.filter(b => computeNextAction(b).urgent && b.status !== "CONFIRMED" && b.status !== "CANCELLED").length;
-  const soon = list.filter(b => {
-    const du = daysUntil(b.checkIn);
-    return du !== null && du <= 2 && b.status !== "CONFIRMED" && b.status !== "CANCELLED";
-  }).length;
-  const ids = list.filter(b => b.status === "ID_REQUESTED" || b.status === "SECOND_ID_REQUESTED").length;
-  const ok = list.filter(b => b.status === "CONFIRMED").length;
-
-  if ($("dNeeds")) $("dNeeds").textContent = String(needs);
-  if ($("dSoon")) $("dSoon").textContent = String(soon);
-  if ($("dIds")) $("dIds").textContent = String(ids);
-  if ($("dOk")) $("dOk").textContent = String(ok);
-}
-
-function runDailyNag(list){
-  // Gentle daily "nag" at 9:00 AM while the page is open.
-  const now = new Date();
-  const key = `sbs_nag_${now.getFullYear()}-${now.getMonth()+1}-${now.getDate()}`;
-  const already = localStorage.getItem(key) === "1";
-  if (already) return;
-
-  const hour = now.getHours();
-  if (hour < 9) return;
-
-  const urgentCount = list.filter(b => computeNextAction(b).urgent && b.status !== "CONFIRMED" && b.status !== "CANCELLED").length;
-  if (urgentCount <= 0) return;
-
-  notifyUser("Bookings need attention", `You have ${urgentCount} booking(s) that need action today.`);
-  localStorage.setItem(key, "1");
-}
-
-
 function renderBookings() {
   const tbody = $("trackerTbody");
   const q = ($("trackerSearch")?.value || "").toLowerCase().trim();
@@ -935,17 +1006,6 @@ function renderBookings() {
   let list = loadBookings();
 
   updateMetricsAndChart(list);
-  updateDashboard(list);
-  runDailyNag(list);
-
-  // Priority sort (ADHD-friendly): urgent → soon → others
-  list = list.map(b => ({ ...b, __next: computeNextAction(b) }));
-  list.sort((a,b) => {
-    if (a.__next.priority !== b.__next.priority) return a.__next.priority - b.__next.priority;
-    const ad = (a.checkIn||"").localeCompare(b.checkIn||"");
-    if (ad !== 0) return ad;
-    return (a.guest||"").localeCompare(b.guest||"");
-  });
 
   if (q) {
     list = list.filter(b =>
@@ -954,22 +1014,10 @@ function renderBookings() {
     );
   }
   if (f !== "ALL") list = list.filter(b => b.status === f);
-
-  // Dashboard quick filters
-  const dashMode = window.__dashMode || null;
-  if (dashMode && (q && q.trim() && q.trim() !== "" && q.trim() !== "" && q.trim() !== "")) {
-    // If user typed a real query, disable dash mode.
-    if (q.trim() !== "") window.__dashMode = null;
-  }
-  if (dashMode === "WAITING_IDS") list = list.filter(b => b.status === "ID_REQUESTED" || b.status === "SECOND_ID_REQUESTED");
-  if (dashMode === "NEEDS_ACTION") list = list.filter(b => (b.__next?.urgent) && b.status !== "CONFIRMED" && b.status !== "CANCELLED");
-  if (dashMode === "ARRIVING_SOON") list = list.filter(b => {
-    const du = daysUntil(b.checkIn);
-    return du !== null && du <= 2 && b.status !== "CONFIRMED" && b.status !== "CANCELLED";
-  });
+  list.sort((a,b) => (b.createdAt||0) - (a.createdAt||0));
 
   tbody.innerHTML = list.map(b => `
-    <tr class="${rowHighlightClass(b.status)} ${b.__next && b.__next.urgent ? "needs-action" : ""}" data-id="${escapeHtml(b.id)}">
+    <tr class="${rowHighlightClass(b.status)}" data-id="${escapeHtml(b.id)}">
       <td><strong>${escapeHtml(b.guest)}</strong></td>
       <td>${escapeHtml(b.unit)}</td>
       <td>${escapeHtml(b.checkIn || "")}</td>
@@ -981,12 +1029,6 @@ function renderBookings() {
             ${statusOptionsHTML(b.status)}
           </select>
         </div>
-      </td>
-      <td>
-        <span class="next-pill ${b.__next.tone}">${escapeHtml(b.__next.label)}</span>
-      </td>
-      <td>
-        <span class="next-pill ${b.__next.tone}">${escapeHtml(b.__next.label)}</span>
       </td>
       <td>
         <div class="row-actions">
@@ -1029,6 +1071,7 @@ function addBookingFromInputs() {
   const list = loadBookings();
   list.push(b);
   saveBookings(list);
+  upsertBookingRemote(b);
 
   renderBookings();
   toast("Booking saved.");
@@ -1159,40 +1202,9 @@ async function createCleanerEventIfConfirmed(b) {
   }
 }
 
-
-function initDashboardQuickFilters(){
-  const el = $("trackerDashboard");
-  if (!el) return;
-  el.addEventListener("click", (e) => {
-    const btn = e.target.closest("[data-dash]");
-    if (!btn) return;
-    const mode = btn.getAttribute("data-dash");
-
-    // reset
-    $("trackerSearch").value = "";
-    $("trackerStatusFilter").value = "ALL";
-
-    if (mode === "CONFIRMED") $("trackerStatusFilter").value = "CONFIRMED";
-    if (mode === "WAITING_IDS") {
-      // show both ID_REQUESTED and SECOND_ID_REQUESTED by using search hack token
-      $("trackerSearch").value = " "; // triggers render, we filter manually below
-      // We'll handle in renderBookings by allowing ALL and then match types
-    }
-    // For NEEDS_ACTION & ARRIVING_SOON we leave status=ALL and use search token too
-    if (mode === "NEEDS_ACTION" || mode === "ARRIVING_SOON") $("trackerSearch").value = " ";
-
-    // store mode so renderBookings can apply additional filter
-    window.__dashMode = mode;
-    renderBookings();
-    document.getElementById("bookingTracker")?.scrollIntoView({behavior:"smooth", block:"start"});
-  });
-}
-
-
 function initBookingTracker() {
   renderBookings();
   scheduleAllReminders();
-  initDashboardQuickFilters();
 
   $("saveBookingBtn").addEventListener("click", addBookingFromInputs);
   $("trackerSearch").addEventListener("input", renderBookings);
@@ -1237,6 +1249,7 @@ function initBookingTracker() {
 
     if (action === "delete") {
       saveBookings(list.filter(x => x.id !== id));
+      deleteBookingRemote(id);
       renderBookings();
       toast("Deleted.");
       return;
@@ -1265,5 +1278,6 @@ function initBookingTracker() {
   initPropertySelector();
   renderFlow();
   initControls();
+  initFirebaseSyncUI();
   initBookingTracker();
 })();
