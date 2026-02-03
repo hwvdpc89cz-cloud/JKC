@@ -683,6 +683,26 @@ function initControls() {
 /* ===========================
    BOOKINGS + TAGGING SECTION
    =========================== */
+const auth = firebase.auth();
+const db = firebase.firestore();
+
+const btnLogin = document.getElementById("btnLogin");
+const btnLogout = document.getElementById("btnLogout");
+
+btnLogin?.addEventListener("click", async () => {
+  const provider = new firebase.auth.GoogleAuthProvider();
+  await auth.signInWithPopup(provider);
+});
+
+btnLogout?.addEventListener("click", async () => {
+  await auth.signOut();
+});
+
+auth.onAuthStateChanged((user) => {
+  const isIn = !!user;
+  if (btnLogin) btnLogin.style.display = isIn ? "none" : "inline-flex";
+  if (btnLogout) btnLogout.style.display = isIn ? "inline-flex" : "none";
+});
 
 const STATUS = {
   ID_REQUESTED: "ID REQUESTED",
